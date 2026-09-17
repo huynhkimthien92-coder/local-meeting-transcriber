@@ -9,10 +9,14 @@ bằng PyInstaller thành file thực thi độc lập trước khi build app Ta
 ```bash
 cd backend
 pip install -r requirements.txt pyinstaller
-pyinstaller --onefile --name meeting-backend \
-  --add-data "app:app" \
-  -m uvicorn app.api.server:app --host 127.0.0.1 --port 8756
+pyinstaller --onefile --name meeting-backend run_server.py
 ```
+
+(Lưu ý: PyInstaller **không** có kiểu chạy `-m module:app` giống CLI của
+uvicorn — `-m` của PyInstaller là flag khác (manifest file trên Windows).
+Vì vậy cần 1 file script Python thật làm điểm vào — `backend/run_server.py`
+— import trực tiếp `app` rồi gọi `uvicorn.run(...)`, thay vì trỏ PyInstaller
+vào chuỗi `"app.api.server:app"`.)
 
 Copy binary ra đúng chỗ Tauri tìm sidecar (tên phải có hậu tố target triple,
 xem tài liệu Tauri sidecar):
