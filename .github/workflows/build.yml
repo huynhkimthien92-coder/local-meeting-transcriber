@@ -67,8 +67,7 @@ jobs:
         run: |
           cd backend
           pip install -r requirements.txt pyinstaller
-          pyinstaller --onefile --name meeting-backend --add-data "app:app" \
-            -m uvicorn app.api.server:app --host 127.0.0.1 --port 8756
+          pyinstaller --onefile --name meeting-backend run_server.py
           mkdir -p ../frontend/src-tauri/binaries
           BIN="dist/meeting-backend"
           [ -f "dist/meeting-backend.exe" ] && BIN="dist/meeting-backend.exe"
