@@ -1,0 +1,19 @@
+# Local Meeting Transcriber — backend requirements
+# Cài: pip install -r requirements.txt
+
+# API server
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+
+# Pipeline AI
+faster-whisper>=1.0.3      # transcribe — nhanh trên CPU nhờ CTranslate2
+pyannote.audio>=3.1.1      # diarization (cần HF token free, xem docs/setup.md)
+requests>=2.31             # gọi Ollama local HTTP API
+
+# Export
+python-docx>=1.1.2
+
+# (Tùy chọn, giúp detect RAM chính xác hơn trên macOS/Windows nếu /proc/meminfo
+# không tồn tại — trên Linux app tự đọc /proc/meminfo nên không bắt buộc)
+psutil>=6.0

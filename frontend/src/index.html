@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Biên Bản Họp</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <nav id="topnav">
+      <div class="brand">🎙️ Biên Bản Họp</div>
+      <div class="nav-actions">
+        <button id="nav-home" class="nav-btn active">Trang chủ</button>
+        <button id="nav-library" class="nav-btn">Thư viện</button>
+        <button id="nav-settings" class="nav-btn">Cài đặt</button>
+      </div>
+    </nav>
+
+    <!-- Màn hình Onboarding: hiện 1 lần khi mở app lần đầu / khi chưa kiểm tra máy -->
+    <section id="view-onboarding" class="view">
+      <div class="card center-card">
+        <h1>Chào mừng bạn 👋</h1>
+        <p class="muted">Trước khi bắt đầu, app sẽ kiểm tra nhanh cấu hình máy để chọn chế độ xử lý phù hợp.</p>
+        <div id="hw-check-status">Đang kiểm tra cấu hình máy...</div>
+        <div id="hw-result" class="hidden">
+          <div class="hw-grid">
+            <div class="hw-item"><span class="hw-label">RAM</span><span id="hw-ram" class="hw-value"></span></div>
+            <div class="hw-item"><span class="hw-label">CPU</span><span id="hw-cpu" class="hw-value"></span></div>
+            <div class="hw-item"><span class="hw-label">GPU</span><span id="hw-gpu" class="hw-value"></span></div>
+          </div>
+          <div id="hw-tier" class="tier-badge"></div>
+          <div id="hw-warning" class="warning-box hidden"></div>
+          <button id="btn-onboarding-continue" class="btn-primary">Tiếp tục</button>
+        </div>
+
+        <!-- Bước 2 của onboarding: chuẩn bị AI ngầm lần đầu mở app (tải model
+             tóm tắt) — không nhắc gì tới "Ollama", người dùng chỉ thấy đang
+             chuẩn bị sẵn sàng để dùng app, giống mọi app khác lúc cài lần đầu. -->
+        <div id="ai-prep" class="hidden">
+          <p class="muted">Đang chuẩn bị AI cho lần đầu sử dụng (chỉ 1 lần, có thể mất vài phút tuỳ mạng)...</p>
+          <div class="progress-track"><div id="ai-prep-bar" class="progress-bar" style="width: 0%"></div></div>
+          <div id="ai-prep-status" class="small muted">Đang kết nối...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Màn hình chính: kéo-thả file -->
+    <section id="view-home" class="view hidden">
+      <div class="card">
+        <h2>Cuộc họp mới</h2>
+        <label class="field">
+          <span>Tên cuộc họp</span>
+          <input id="meeting-title" type="text" placeholder="VD: Họp kế hoạch Q4" />
+        </label>
+
+        <div id="dropzone" class="dropzone">
+          <div class="dropzone-icon">📂</div>
+          <div>Kéo file ghi âm vào đây, hoặc</div>
+          <button id="btn-choose-file" class="btn-secondary">Chọn file trên máy</button>
+          <div class="muted small">Hỗ trợ mp3, wav, m4a...</div>
+          <input id="file-input" type="file" accept="audio/*" class="hidden" />
+        </div>
+
+        <div id="estimate-box" class="hidden info-box"></div>
+
+        <div id="diarization-status-note" class="info-box small"></div>
+
+        <button id="btn-start" class="btn-primary hidden">Bắt đầu xử lý</button>
+      </div>
+    </section>
+
+    <!-- Màn hình xử lý: thanh tiến trình -->
+    <section id="view-processing" class="view hidden">
+      <div class="card center-card">
+        <h2 id="processing-title">Đang xử lý...</h2>
+        <div class="progress-track">
+          <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <div id="progress-pct" class="progress-pct">0%</div>
+        <div id="progress-message" class="muted">Đang chuẩn bị...</div>
+        <div class="muted small">Bạn có thể chuyển sang việc khác — app sẽ thông báo khi xong.</div>
+      </div>
+    </section>
+
+    <!-- Màn hình kết quả -->
+    <section id="view-results" class="view hidden">
+      <div class="results-layout">
+        <div class="card results-summary">
+          <h2>Biên bản</h2>
+          <div id="summary-content" class="summary-content"></div>
+          <button id="btn-export" class="btn-primary">Xuất file DOCX</button>
+        </div>
+        <div class="card results-transcript">
+          <div class="transcript-header">
+            <h2>Bản ghi chi tiết</h2>
+            <div class="muted small">Bấm vào tên người nói để đổi tên</div>
+          </div>
+          <div id="speaker-legend" class="speaker-legend"></div>
+          <div id="transcript-list" class="transcript-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Thư viện biên bản cũ -->
+    <section id="view-library" class="view hidden">
+      <div class="card">
+        <h2>Thư viện biên bản</h2>
+        <input id="library-search" type="text" placeholder="Tìm theo tên cuộc họp..." class="field-input" />
+        <div id="library-list" class="library-list"></div>
+      </div>
+    </section>
+
+    <!-- Cài đặt: bật/tắt nhận diện người nói + luồng dẫn dắt lấy HF token.
+         Mặc định TẮT — app chạy đầy đủ (transcribe + tóm tắt) mà không cần
+         bước này. Chỉ ai muốn phân biệt người nói mới cần làm theo dưới đây. -->
+    <section id="view-settings" class="view hidden">
+      <div class="card">
+        <h2>Cài đặt</h2>
+
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-title">Nhận diện người nói</div>
+            <div class="muted small">Phân biệt ai nói câu nào trong biên bản. Mặc định tắt — không bắt buộc để dùng app.</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-diarization" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div id="diarization-guide" class="hidden">
+          <div class="guide-intro info-box">
+            Tính năng này cần 1 lần kết nối miễn phí với Hugging Face (nơi giữ model AI nhận diện giọng nói).
+            Làm theo 3 bước dưới đây, mất khoảng 3-5 phút.
+          </div>
+
+          <div class="guide-step">
+            <div class="guide-step-num">1</div>
+            <div class="guide-step-body">
+              <div class="guide-step-title">Tạo tài khoản Hugging Face (nếu chưa có)</div>
+              <div class="muted small">Miễn phí, giống tạo tài khoản Google.</div>
+              <button class="btn-secondary btn-open-link" data-url="https://huggingface.co/join">Mở trang đăng ký</button>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="guide-step-num">2</div>
+            <div class="guide-step-body">
+              <div class="guide-step-title">Đồng ý điều khoản dùng model nhận diện giọng nói</div>
+              <div class="muted small">Bấm nút bên dưới → đăng nhập nếu được hỏi → bấm "Agree and access repository".</div>
+              <button class="btn-secondary btn-open-link" data-url="https://huggingface.co/pyannote/speaker-diarization-3.1">Mở trang model</button>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="guide-step-num">3</div>
+            <div class="guide-step-body">
+              <div class="guide-step-title">Lấy access token và dán vào đây</div>
+              <div class="muted small">Bấm "Create new token" (loại "Read" là đủ), copy đoạn bắt đầu bằng "hf_...", dán vào ô dưới.</div>
+              <button class="btn-secondary btn-open-link" data-url="https://huggingface.co/settings/tokens">Mở trang lấy token</button>
+              <div class="token-input-row">
+                <input id="hf-token-input" type="password" placeholder="hf_..." class="field-input" />
+                <button id="btn-save-token" class="btn-secondary">Lưu</button>
+                <button id="btn-test-token" class="btn-secondary">Kiểm tra</button>
+              </div>
+              <div id="token-test-result" class="small"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <h2>Model tóm tắt biên bản</h2>
+        <div class="muted small" id="ollama-model-current"></div>
+        <div class="info-box">
+          Máy không có GPU rời sẽ được app tự chọn model nhỏ (nhanh, vài phút
+          ra biên bản). Model càng lớn thì biên bản càng chi tiết nhưng càng
+          chậm — có thể mất hàng chục phút trên máy không có GPU.
+        </div>
+        <label class="field">
+          <span>Chọn model</span>
+          <select id="select-ollama-model" class="field-input">
+            <option value="">Tự động (khuyến nghị theo máy)</option>
+            <option value="llama3.2:1b">llama3.2:1b — nhanh nhất</option>
+            <option value="llama3.2:3b">llama3.2:3b — cân bằng (chậm hơn nhiều nếu không có GPU)</option>
+            <option value="qwen2.5:7b">qwen2.5:7b — chi tiết nhất, rất chậm nếu không có GPU</option>
+          </select>
+        </label>
+        <button id="btn-save-ollama-model" class="btn-secondary">Lưu lựa chọn</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
