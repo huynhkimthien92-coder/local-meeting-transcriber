@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Quyền mặc định cho cửa sổ chính — Tauri 2 chặn mọi lệnh theo mặc định, phải khai báo rõ từng quyền cần dùng thì frontend mới gọi được.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:default"
+  ]
+}
