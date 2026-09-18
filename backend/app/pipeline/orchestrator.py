@@ -17,8 +17,13 @@ from .models import MeetingJob, JobStage, ProgressEvent, TranscriptSegment
 from .transcribe import transcribe_audio, TranscribeError
 from .diarize import diarize_audio, assign_speakers_to_segments, DiarizeUnavailable, DiarizeError
 from .summarize import summarize_meeting, SummarizeError, OllamaNotRunning
+from ..paths import DATA_DIR
 
-STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "meetings"
+# QUAN TRỌNG: dùng DATA_DIR dùng chung (xem app/paths.py) -- KHÔNG tự tính
+# lại theo Path(__file__) ở đây, vì sau khi đóng gói PyInstaller --onefile,
+# vị trí file code chỉ là thư mục tạm bị xoá mỗi lần tắt app (lỗi thật đã
+# gặp: mất hết job đã lưu sau khi tắt/mở lại app).
+STORAGE_DIR = DATA_DIR / "meetings"
 
 # Trọng số % cho từng bước trong tổng tiến trình hiển thị cho người dùng.
 # Transcribe thường chiếm nhiều thời gian nhất trên máy không GPU.
