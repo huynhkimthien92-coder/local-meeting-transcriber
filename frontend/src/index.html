@@ -188,6 +188,20 @@
         </label>
         <button id="btn-save-ollama-model" class="btn-secondary">Lưu lựa chọn</button>
       </div>
+
+      <!-- Nơi lưu model AI + dữ liệu app -- mặc định Windows luôn lưu ở ổ C:
+           (AppData) bất kể cài app ở ổ nào, dễ hết dung lượng vì model AI có
+           thể nặng vài GB. Cho phép đổi sang ổ khác nếu ổ C: chật. -->
+      <div class="card" style="margin-top: 16px;">
+        <h2>Nơi lưu model AI &amp; dữ liệu</h2>
+        <div class="info-box small">
+          Windows luôn lưu dữ liệu ứng dụng ở ổ C: theo mặc định, dù bạn cài app ở ổ nào — model AI có thể nặng vài GB
+          nên nếu ổ C: ít dung lượng trống, bạn nên đổi sang ổ khác.
+        </div>
+        <div class="muted small">Đang lưu tại: <span id="data-dir-current">Đang tải...</span></div>
+        <button id="btn-change-data-dir" class="btn-secondary">Đổi thư mục lưu trữ...</button>
+        <div id="data-dir-note" class="small hidden"></div>
+      </div>
     </section>
   </div>
 
