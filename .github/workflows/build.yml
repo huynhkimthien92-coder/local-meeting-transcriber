@@ -103,7 +103,15 @@ jobs:
           # chính khiến file cài đặt Windows quá nặng, vỡ cả NSIS lẫn MSI.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt pyinstaller
-          pyinstaller --onefile --name meeting-backend run_server.py
+          # QUAN TRỌNG: --collect-data faster_whisper -- PyInstaller mặc định
+          # CHỈ đóng gói code Python (.py), KHÔNG tự biết đóng gói kèm các
+          # file dữ liệu không phải code nằm trong thư viện (vd model VAD
+          # "silero_vad_v6.onnx" mà faster-whisper cần để phát hiện đoạn có
+          # tiếng nói) -- lỗi thật đã gặp lúc chạy app trên Windows:
+          # "[ONNXRuntimeError]... Load model ...silero_vad_v6.onnx failed.
+          # File doesn't exist". Cờ này bảo PyInstaller gói kèm TOÀN BỘ file
+          # dữ liệu đi cùng thư viện faster_whisper, không riêng code.
+          pyinstaller --onefile --name meeting-backend --collect-data faster_whisper run_server.py
           mkdir -p ../frontend/src-tauri/binaries
           BIN="dist/meeting-backend"
           [ -f "dist/meeting-backend.exe" ] && BIN="dist/meeting-backend.exe"
