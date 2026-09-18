@@ -149,6 +149,28 @@ jobs:
           if [ -n "$LIB_DIR" ]; then
             cp -r "$LIB_DIR"/. frontend/src-tauri/resources/lib/
             echo "Đã copy thư mục lib Ollama ($LIB_DIR) vào resources/lib"
+
+            # QUAN TRỌNG: bản Ollama tải về kèm SẴN nhiều backend GPU khác
+            # nhau trong lib/ollama/ — thực tế đã gặp trên Windows: 2 bản
+            # CUDA gần trùng nhau (cuda_v12/, cuda_v13/ — chỉ khác driver
+            # NVIDIA hỗ trợ) CHIẾM PHẦN LỚN dung lượng (mỗi bản có sẵn
+            # cublas64.dll rất nặng), cộng thêm vulkan/ (nhẹ hơn nhiều).
+            # Tổng cả thư mục ~1.8GB -> vượt giới hạn thực tế của WiX/MSI
+            # (công cụ "light.exe" đóng gói .msi trên Windows) về dung
+            # lượng + độ dài đường dẫn -> đây là nghi vấn chính gây lỗi
+            # "light.exe" không rõ nguyên nhân đã gặp.
+            #
+            # Chỉ xoá cuda_v*/ (CUDA — riêng cho GPU NVIDIA, là phần nặng
+            # nhất), GIỮ LẠI vulkan/ — Vulkan là chuẩn đồ hoạ chung nên vẫn
+            # tăng tốc GPU được cho cả NVIDIA/AMD/Intel, mà nhẹ hơn CUDA rất
+            # nhiều -> vừa giảm mạnh dung lượng vừa không cắt hết tính năng
+            # GPU của người dùng có card rời.
+            echo "Kích thước từng thư mục con trong lib/ollama trước khi cắt bớt:"
+            du -sh frontend/src-tauri/resources/lib/ollama/*/ 2>/dev/null || true
+            find frontend/src-tauri/resources/lib -maxdepth 2 -type d \
+              \( -iname "cuda_v*" -o -iname "*nvidia*" \) \
+              -exec echo "Xoá (CUDA - chỉ NVIDIA dùng được, đã có Vulkan thay thế):" {} \; \
+              -exec rm -rf {} +
           else
             echo "Không thấy thư mục lib riêng trong bản Ollama này (bình thường với một số nền tảng, vd macOS dùng 1 file duy nhất) -- bỏ qua."
           fi
