@@ -29,7 +29,14 @@ jobs:
           - os: windows-latest
             ollama_asset: ollama-windows-amd64.zip
           - os: ubuntu-latest
-            ollama_asset: ollama-linux-amd64.tgz
+            # Ollama đã đổi định dạng nén cho bản Linux từ .tgz (gzip) sang
+            # .tar.zst (zstd) kể từ các bản release gần đây — tên file cũ
+            # "ollama-linux-amd64.tgz" không còn tồn tại trên GitHub Releases
+            # nữa (đó là lý do curl chỉ tải về 9 byte: trang lỗi 404 của
+            # GitHub, không phải file thật). Xác nhận lại tên file chính xác
+            # tại https://github.com/ollama/ollama/releases nếu Ollama đổi
+            # lần nữa trong tương lai.
+            ollama_asset: ollama-linux-amd64.tar.zst
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -72,7 +79,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf build-essential curl wget file libssl-dev libgtk-3-dev
+            librsvg2-dev patchelf build-essential curl wget file libssl-dev libgtk-3-dev zstd
 
       - name: Xác định target triple của máy build này
         id: triple
@@ -92,16 +99,32 @@ jobs:
       - name: Tải AI engine (Ollama) đúng bản cho hệ điều hành này
         run: |
           mkdir -p frontend/src-tauri/binaries
-          curl -L -o ollama_asset "https://github.com/ollama/ollama/releases/latest/download/${{ matrix.ollama_asset }}"
+          curl -fL -o ollama_asset "https://github.com/ollama/ollama/releases/latest/download/${{ matrix.ollama_asset }}"
+          # Kiểm tra file tải về có thực sự lớn không (phòng trường hợp
+          # GitHub đổi tên asset lần nữa trong tương lai và curl chỉ tải về
+          # 1 trang lỗi nhỏ thay vì file binary thật -> build sẽ báo lỗi rõ
+          # ràng ở đây thay vì lỗi khó hiểu lúc giải nén).
+          size=$(wc -c < ollama_asset)
+          echo "Kích thước file tải về: $size byte"
+          if [ "$size" -lt 1000000 ]; then
+            echo "::error::File Ollama tải về quá nhỏ ($size byte) - có thể tên file asset đã đổi. Kiểm tra lại https://github.com/ollama/ollama/releases"
+            exit 1
+          fi
           mkdir -p ollama_extracted
           case "${{ matrix.ollama_asset }}" in
             *.zip) unzip -o ollama_asset -d ollama_extracted ;;
             *.tgz) tar -xzf ollama_asset -C ollama_extracted ;;
+            *.tar.zst) tar --use-compress-program=unzstd -xf ollama_asset -C ollama_extracted ;;
           esac
           SRC=$(find ollama_extracted -type f \( -iname "ollama" -o -iname "ollama.exe" \) | head -n1)
           EXT=""; [[ "$SRC" == *.exe ]] && EXT=".exe"
           cp "$SRC" "frontend/src-tauri/binaries/ollama-${{ steps.triple.outputs.triple }}${EXT}"
           chmod +x "frontend/src-tauri/binaries/ollama-${{ steps.triple.outputs.triple }}${EXT}" || true
+          # Bản Linux nén bằng zstd nặng hơn hẳn bản cũ (~1.3GB thay vì
+          # ~100MB) -> xoá ngay file nén + thư mục giải nén tạm sau khi đã
+          # lấy được binary cần dùng, tránh chiếm thêm dung lượng đĩa cho
+          # các bước build Tauri phía sau (máy ảo Ubuntu vốn đã eo hẹp đĩa).
+          rm -rf ollama_asset ollama_extracted
 
       - name: Cài dependencies frontend
         run: cd frontend && npm install
