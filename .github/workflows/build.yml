@@ -155,7 +155,7 @@ jobs:
       - name: Cài dependencies frontend
         run: cd frontend && npm install
 
-      - name: Build app Tauri (ra file cài đặt .exe / .dmg / .AppImage / .deb)
+      - name: Build app Tauri (ra file cài đặt .msi / .dmg / .AppImage)
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: frontend
@@ -165,7 +165,7 @@ jobs:
         with:
           name: bien-ban-hop-${{ matrix.os }}
           path: |
-            frontend/src-tauri/target/release/bundle/**/*.exe
+            frontend/src-tauri/target/release/bundle/**/*.msi
             frontend/src-tauri/target/release/bundle/**/*.dmg
             frontend/src-tauri/target/release/bundle/**/*.AppImage
           if-no-files-found: warn
