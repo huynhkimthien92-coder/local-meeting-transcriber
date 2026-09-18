@@ -34,6 +34,8 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/meeting-backend", "binaries/ollama"],
-    "resources": []
+    "resources": {
+      "resources/lib": "lib"
+    }
   }
 }
