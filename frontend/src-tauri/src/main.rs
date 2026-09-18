@@ -43,11 +43,14 @@ fn main() {
 
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = ollama_rx.recv().await {
-                    if let CommandEvent::Stdout(line) = event {
-                        println!("[ai-engine] {}", String::from_utf8_lossy(&line));
-                    }
-                    if let CommandEvent::Stderr(line) = event {
-                        eprintln!("[ai-engine:err] {}", String::from_utf8_lossy(&line));
+                    match event {
+                        CommandEvent::Stdout(line) => {
+                            println!("[ai-engine] {}", String::from_utf8_lossy(&line));
+                        }
+                        CommandEvent::Stderr(line) => {
+                            eprintln!("[ai-engine:err] {}", String::from_utf8_lossy(&line));
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -66,11 +69,14 @@ fn main() {
             // có thể ghi ra file log trong thư mục app data thay vì stdout.
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
-                    if let CommandEvent::Stdout(line) = event {
-                        println!("[backend] {}", String::from_utf8_lossy(&line));
-                    }
-                    if let CommandEvent::Stderr(line) = event {
-                        eprintln!("[backend:err] {}", String::from_utf8_lossy(&line));
+                    match event {
+                        CommandEvent::Stdout(line) => {
+                            println!("[backend] {}", String::from_utf8_lossy(&line));
+                        }
+                        CommandEvent::Stderr(line) => {
+                            eprintln!("[backend:err] {}", String::from_utf8_lossy(&line));
+                        }
+                        _ => {}
                     }
                 }
             });
