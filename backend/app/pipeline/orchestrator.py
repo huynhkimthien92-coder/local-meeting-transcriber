@@ -51,13 +51,21 @@ class JobStore:
 
     def save(self, job: MeetingJob) -> None:
         path = self._job_dir(job.job_id) / "job.json"
-        path.write_text(json.dumps(job.to_dict(), ensure_ascii=False, indent=2))
+        # QUAN TRỌNG: PHẢI chỉ định encoding="utf-8" tường minh -- thiếu
+        # dòng này, Windows dùng bảng mã mặc định của máy (thường cp1252,
+        # không có tiếng Việt) để ghi file -> lỗi thật đã gặp:
+        # "UnicodeEncodeError: 'charmap' codec can't encode character..."
+        # ngay khi tiêu đề/nội dung cuộc họp có dấu tiếng Việt. Linux/macOS
+        # mặc định đã UTF-8 nên lỗi này không lộ ra lúc test trên máy đó.
+        path.write_text(
+            json.dumps(job.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def load(self, job_id: str) -> MeetingJob | None:
         path = self._job_dir(job_id) / "job.json"
         if not path.exists():
             return None
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         segments = [TranscriptSegment(**s) for s in data.get("segments", [])]
         data["segments"] = segments
         data["stage"] = JobStage(data["stage"])
@@ -172,6 +180,8 @@ class MeetingPipeline:
             job.stage = JobStage.ERROR
             job.error_message = f"Lỗi không xác định: {e}"
             self.store.save(job)
-            (self.store._job_dir(job.job_id) / "error_trace.log").write_text(traceback.format_exc())
+            (self.store._job_dir(job.job_id) / "error_trace.log").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
             on_progress(ProgressEvent(job_id=job.job_id, stage=JobStage.ERROR, percent=job.percent,
                                         message=job.error_message))
