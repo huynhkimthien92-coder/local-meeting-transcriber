@@ -27,6 +27,7 @@ from ..pipeline.transcribe import estimate_processing_time
 from ..pipeline import ollama_manager
 from ..export.docx_export import export_to_docx
 from ..settings import AppSettings, load_settings, save_settings
+from ..paths import DATA_DIR
 
 app = FastAPI(title="Local Meeting Transcriber API")
 
@@ -40,7 +41,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = Path(__file__).resolve().parents[2] / "storage" / "uploads"
+# QUAN TRỌNG: dùng DATA_DIR dùng chung (xem app/paths.py) -- KHÔNG tự tính
+# theo Path(__file__), vì sau khi đóng gói PyInstaller --onefile, đường dẫn
+# đó chỉ là thư mục tạm bị xoá mỗi lần tắt app (lỗi thật đã gặp: mất file
+# ghi âm đã upload sau khi tắt/mở lại app).
+UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 store = JobStore()
@@ -255,7 +260,7 @@ def export_job(job_id: str, fmt: str = "docx"):
     if fmt != "docx":
         raise HTTPException(400, "Hiện chỉ hỗ trợ xuất DOCX")
 
-    out_dir = Path(__file__).resolve().parents[2] / "storage" / "exports"
+    out_dir = DATA_DIR / "exports"
     out_path = out_dir / f"{job.job_id}.docx"
     export_to_docx(job, out_path)
     return FileResponse(
