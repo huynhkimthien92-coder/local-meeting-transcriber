@@ -42,6 +42,19 @@ fn main() {
             std::fs::create_dir_all(&ollama_models_dir)
                 .expect("Không tạo được thư mục lưu model AI");
 
+            // Thư mục dữ liệu của BACKEND (job đã lưu, file ghi âm upload,
+            // file .docx xuất ra, settings.json) -- cùng lý do với
+            // ollama_models_dir ở trên: phải là thư mục CÓ QUYỀN GHI và ỔN
+            // ĐỊNH (app_data_dir), không phải nơi backend.exe được giải nén
+            // ra chạy. Backend (xem backend/app/paths.py) đọc biến môi
+            // trường MEETING_DATA_DIR này; nếu thiếu, backend tự rơi về
+            // đường dẫn cạnh file code -- mà với PyInstaller --onefile đó là
+            // 1 thư mục TẠM bị xoá mỗi lần tắt app -> lỗi thật đã gặp: mất
+            // hết biên bản đã lưu + cài đặt sau khi tắt/mở lại app.
+            let backend_data_dir = app_data_dir.join("backend-data");
+            std::fs::create_dir_all(&backend_data_dir)
+                .expect("Không tạo được thư mục dữ liệu backend");
+
             // "ollama" là binary Ollama gốc (tải từ ollama.com/download, đổi
             // tên theo target triple), khai báo trong tauri.conf.json ->
             // bundle.externalBin, y hệt cách làm với meeting-backend.
@@ -106,6 +119,7 @@ fn main() {
                 .sidecar("meeting-backend")
                 .expect("Không tìm thấy sidecar meeting-backend — chạy scripts/build_backend.sh trước")
                 .env("PYTHONUTF8", "1")
+                .env("MEETING_DATA_DIR", backend_data_dir.to_string_lossy().to_string())
                 .spawn()
                 .expect("Không khởi động được backend local");
 
