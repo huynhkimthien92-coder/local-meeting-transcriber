@@ -6,9 +6,22 @@
 //      Ollama). Model AI (vài trăm MB - vài GB) vẫn tải lần đầu mở app,
 //      nhưng qua UI onboarding có progress bar (xem app/api/server.py:
 //      /api/onboarding/prepare-ai), không phải lệnh CLI.
+use std::sync::Mutex;
 use tauri::Manager;
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+
+// Giữ lại 2 process con (Ollama + backend) để có thể tắt hẳn chúng khi app
+// đóng. Nếu không làm việc này, đóng cửa sổ app trên Windows đôi khi KHÔNG
+// tắt luôn 2 tiến trình con — chúng vẫn chạy ngầm, chiếm sẵn cổng
+// (127.0.0.1:11434 và :8756) -> lần mở app SAU đó báo lỗi
+// "Only one usage of each socket address..." vì cổng đã bị chiếm bởi chính
+// lần chạy trước còn sót lại. Đây là lỗi thật đã gặp, không phải giả định.
+struct SidecarChildren {
+    ollama: Mutex<Option<CommandChild>>,
+    backend: Mutex<Option<CommandChild>>,
+}
 
 fn main() {
     tauri::Builder::default()
@@ -32,10 +45,17 @@ fn main() {
             // "ollama" là binary Ollama gốc (tải từ ollama.com/download, đổi
             // tên theo target triple), khai báo trong tauri.conf.json ->
             // bundle.externalBin, y hệt cách làm với meeting-backend.
-            let (mut ollama_rx, _ollama_child) = shell
+            //
+            // Dùng cổng RIÊNG (39217) thay vì cổng mặc định 11434 của Ollama:
+            // nhiều máy người dùng (đặc biệt dân kỹ thuật) có thể đã tự cài
+            // sẵn Ollama chạy nền ở cổng 11434 -> nếu dùng chung cổng đó,
+            // sidecar Ollama đóng gói kèm app sẽ không bind được cổng và lỗi
+            // y như log Thiên gặp. Đổi sang cổng riêng để không bao giờ đụng
+            // độ với bất kỳ cài đặt Ollama nào khác trên máy.
+            let (mut ollama_rx, ollama_child) = shell
                 .sidecar("ollama")
                 .expect("Không tìm thấy sidecar ollama — xem docs/packaging-notes.md mục 2")
-                .env("OLLAMA_HOST", "127.0.0.1:11434")
+                .env("OLLAMA_HOST", "127.0.0.1:39217")
                 .env("OLLAMA_MODELS", ollama_models_dir.to_string_lossy().to_string())
                 .args(["serve"])
                 .spawn()
@@ -59,7 +79,7 @@ fn main() {
             // khai báo trong tauri.conf.json -> bundle.externalBin. Backend tự
             // chờ/retry khi gọi Ollama nên không cần đồng bộ thứ tự khởi động
             // ở đây — 2 sidecar khởi động song song là đủ.
-            let (mut rx, _child) = shell
+            let (mut rx, backend_child) = shell
                 .sidecar("meeting-backend")
                 .expect("Không tìm thấy sidecar meeting-backend — chạy scripts/build_backend.sh trước")
                 .spawn()
@@ -81,8 +101,32 @@ fn main() {
                 }
             });
 
+            app.manage(SidecarChildren {
+                ollama: Mutex::new(Some(ollama_child)),
+                backend: Mutex::new(Some(backend_child)),
+            });
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Lỗi khi chạy ứng dụng Tauri");
+        .build(tauri::generate_context!())
+        .expect("Lỗi khi chạy ứng dụng Tauri")
+        .run(|app_handle, event| {
+            // Tắt hẳn 2 sidecar khi app thoát (đóng cửa sổ cuối cùng hoặc
+            // thoát hẳn) -> tránh để sót tiến trình ngầm chiếm cổng cho lần
+            // mở app kế tiếp (xem giải thích ở SidecarChildren phía trên).
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                if let Some(children) = app_handle.try_state::<SidecarChildren>() {
+                    if let Ok(mut guard) = children.ollama.lock() {
+                        if let Some(child) = guard.take() {
+                            let _ = child.kill();
+                        }
+                    }
+                    if let Ok(mut guard) = children.backend.lock() {
+                        if let Some(child) = guard.take() {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+            }
+        });
 }
