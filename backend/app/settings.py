@@ -13,10 +13,15 @@ hình Cài đặt, có hướng dẫn dẫn dắt từng bước (xem /api/setti
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from pathlib import Path
 import json
 
-SETTINGS_PATH = Path(__file__).resolve().parents[1] / "storage" / "settings.json"
+from .paths import DATA_DIR
+
+# QUAN TRỌNG: dùng DATA_DIR dùng chung (xem app/paths.py) thay vì tự tính
+# theo Path(__file__) -- xem giải thích chi tiết trong app/paths.py (lỗi
+# thật đã gặp: cài đặt bị reset về mặc định mỗi lần mở lại app sau khi
+# đóng gói PyInstaller).
+SETTINGS_PATH = DATA_DIR / "settings.json"
 
 
 @dataclass
