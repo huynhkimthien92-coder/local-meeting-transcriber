@@ -94,9 +94,18 @@ fn main() {
             // khai báo trong tauri.conf.json -> bundle.externalBin. Backend tự
             // chờ/retry khi gọi Ollama nên không cần đồng bộ thứ tự khởi động
             // ở đây — 2 sidecar khởi động song song là đủ.
+            // PYTHONUTF8=1: ép Python luôn coi UTF-8 là bảng mã mặc định cho
+            // MỌI thao tác đọc/ghi file và stdout/stderr, bất kể bảng mã hệ
+            // thống Windows đang đặt là gì (thường là cp1252, không có tiếng
+            // Việt). Đây là lớp bảo vệ chung, phòng những chỗ đọc/ghi text
+            // chưa được chỉ định encoding="utf-8" tường minh trong code
+            // Python (lỗi thật đã gặp trên Windows: "UnicodeEncodeError:
+            // 'charmap' codec can't encode character..." khi lưu job có
+            // tiêu đề/nội dung tiếng Việt có dấu).
             let (mut rx, backend_child) = shell
                 .sidecar("meeting-backend")
                 .expect("Không tìm thấy sidecar meeting-backend — chạy scripts/build_backend.sh trước")
+                .env("PYTHONUTF8", "1")
                 .spawn()
                 .expect("Không khởi động được backend local");
 
