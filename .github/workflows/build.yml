@@ -125,6 +125,27 @@ jobs:
           EXT=""; [[ "$SRC" == *.exe ]] && EXT=".exe"
           cp "$SRC" "frontend/src-tauri/binaries/ollama-${{ steps.triple.outputs.triple }}${EXT}"
           chmod +x "frontend/src-tauri/binaries/ollama-${{ steps.triple.outputs.triple }}${EXT}" || true
+
+          # QUAN TRỌNG: "ollama(.exe)" chỉ là vỏ điều khiển -- phần THỰC SỰ
+          # chạy model (llama-server + các thư viện backend CPU/GPU) nằm
+          # trong thư mục con "lib/ollama/" đi kèm bản tải chính thức.
+          # externalBin của Tauri chỉ mang được đúng 1 file thực thi, không
+          # mang theo thư mục này -> phải copy riêng "lib/" vào
+          # resources/lib để tauri.conf.json đóng gói kèm installer, rồi
+          # main.rs trỏ OLLAMA_LIBRARY_PATH vào đó lúc chạy (lỗi thật đã
+          # gặp trên Windows: "llama-server binary not found").
+          mkdir -p frontend/src-tauri/resources/lib
+          LIB_DIR=$(find ollama_extracted -type d -iname "lib" | head -n1)
+          if [ -n "$LIB_DIR" ]; then
+            cp -r "$LIB_DIR"/. frontend/src-tauri/resources/lib/
+            echo "Đã copy thư mục lib Ollama ($LIB_DIR) vào resources/lib"
+          else
+            echo "Không thấy thư mục lib riêng trong bản Ollama này (bình thường với một số nền tảng, vd macOS dùng 1 file duy nhất) -- bỏ qua."
+          fi
+          # Giữ resources/lib luôn tồn tại (kể cả rỗng) để tauri.conf.json
+          # không lỗi lúc build vì thiếu đường dẫn resources đã khai báo.
+          touch frontend/src-tauri/resources/lib/.gitkeep
+
           # Bản Linux nén bằng zstd nặng hơn hẳn bản cũ (~1.3GB thay vì
           # ~100MB) -> xoá ngay file nén + thư mục giải nén tạm sau khi đã
           # lấy được binary cần dùng, tránh chiếm thêm dung lượng đĩa cho
