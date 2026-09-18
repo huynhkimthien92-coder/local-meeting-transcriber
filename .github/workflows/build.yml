@@ -57,8 +57,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL || true
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /opt/az \
+            /usr/local/share/powershell /usr/local/share/chromium \
+            /usr/local/lib/heroku /usr/lib/jvm /usr/local/julia* \
+            /opt/hostedtoolcache/go /opt/hostedtoolcache/PyPy || true
           sudo docker image prune -af || true
+          sudo docker system prune -af --volumes || true
+          sudo apt-get clean || true
           df -h /
 
       - name: Cài Rust
@@ -142,5 +147,4 @@ jobs:
             frontend/src-tauri/target/release/bundle/**/*.exe
             frontend/src-tauri/target/release/bundle/**/*.dmg
             frontend/src-tauri/target/release/bundle/**/*.AppImage
-            frontend/src-tauri/target/release/bundle/**/*.deb
           if-no-files-found: warn
