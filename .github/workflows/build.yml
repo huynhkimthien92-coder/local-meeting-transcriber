@@ -93,6 +93,15 @@ jobs:
       - name: Đóng gói backend Python thành 1 binary (PyInstaller)
         run: |
           cd backend
+          # QUAN TRỌNG: pyannote.audio (tách giọng nói) phụ thuộc "torch" --
+          # nếu cài "pip install -r requirements.txt" bình thường, pip sẽ tự
+          # tải bản torch có kèm CUDA (hỗ trợ GPU NVIDIA) nặng 2-3GB, dù app
+          # này mặc định chỉ chạy CPU (diarization/GPU không bắt buộc). Cài
+          # trước bản torch CPU-only (nhẹ hơn nhiều) từ index riêng của
+          # PyTorch để pip không tải nhầm bản CUDA nặng khi resolve
+          # dependency của pyannote.audio ở bước sau -- đây là nguyên nhân
+          # chính khiến file cài đặt Windows quá nặng, vỡ cả NSIS lẫn MSI.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt pyinstaller
           pyinstaller --onefile --name meeting-backend run_server.py
           mkdir -p ../frontend/src-tauri/binaries
@@ -100,6 +109,7 @@ jobs:
           [ -f "dist/meeting-backend.exe" ] && BIN="dist/meeting-backend.exe"
           EXT=""; [[ "$BIN" == *.exe ]] && EXT=".exe"
           cp "$BIN" "../frontend/src-tauri/binaries/meeting-backend-${{ steps.triple.outputs.triple }}${EXT}"
+          echo "Kích thước backend đóng gói: $(du -h "$BIN" | cut -f1)"
 
       - name: Tải AI engine (Ollama) đúng bản cho hệ điều hành này
         run: |
@@ -145,6 +155,7 @@ jobs:
           # Giữ resources/lib luôn tồn tại (kể cả rỗng) để tauri.conf.json
           # không lỗi lúc build vì thiếu đường dẫn resources đã khai báo.
           touch frontend/src-tauri/resources/lib/.gitkeep
+          echo "Kích thước thư mục lib Ollama: $(du -sh frontend/src-tauri/resources/lib | cut -f1)"
 
           # Bản Linux nén bằng zstd nặng hơn hẳn bản cũ (~1.3GB thay vì
           # ~100MB) -> xoá ngay file nén + thư mục giải nén tạm sau khi đã
