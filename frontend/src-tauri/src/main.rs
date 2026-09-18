@@ -52,10 +52,25 @@ fn main() {
             // sidecar Ollama đóng gói kèm app sẽ không bind được cổng và lỗi
             // y như log Thiên gặp. Đổi sang cổng riêng để không bao giờ đụng
             // độ với bất kỳ cài đặt Ollama nào khác trên máy.
+            //
+            // OLLAMA_LIBRARY_PATH: "ollama.exe" chỉ là vỏ điều khiển — phần
+            // thực sự chạy model (llama-server + các thư viện backend CPU/
+            // GPU) nằm trong thư mục con "lib/ollama/" đi kèm khi tải Ollama
+            // chính thức. externalBin của Tauri chỉ mang được đúng 1 file
+            // thực thi, không mang theo thư mục "lib" này -> phải đóng gói
+            // "lib/" riêng qua bundle.resources (xem tauri.conf.json) rồi trỏ
+            // OLLAMA_LIBRARY_PATH vào đúng thư mục resource đó, để Ollama tìm
+            // thấy "lib/ollama/llama-server(.exe)" lúc chạy thật (lỗi thật đã
+            // gặp: "llama-server binary not found").
+            let resource_dir = app
+                .path()
+                .resource_dir()
+                .expect("Không lấy được thư mục resources của app");
             let (mut ollama_rx, ollama_child) = shell
                 .sidecar("ollama")
                 .expect("Không tìm thấy sidecar ollama — xem docs/packaging-notes.md mục 2")
                 .env("OLLAMA_HOST", "127.0.0.1:39217")
+                .env("OLLAMA_LIBRARY_PATH", resource_dir.to_string_lossy().to_string())
                 .env("OLLAMA_MODELS", ollama_models_dir.to_string_lossy().to_string())
                 .args(["serve"])
                 .spawn()
