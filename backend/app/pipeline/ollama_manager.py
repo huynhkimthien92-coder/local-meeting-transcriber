@@ -20,7 +20,10 @@ import json
 
 import requests
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+# Cổng RIÊNG (không dùng 11434 mặc định của Ollama) -- khớp với
+# frontend/src-tauri/src/main.rs (OLLAMA_HOST=127.0.0.1:39217). Tránh đụng
+# độ nếu máy người dùng lỡ có cài sẵn Ollama khác chạy ở cổng mặc định.
+OLLAMA_BASE_URL = "http://localhost:39217"
 
 
 class OllamaUnreachable(RuntimeError):
