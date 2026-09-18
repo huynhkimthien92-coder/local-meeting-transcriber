@@ -6,8 +6,11 @@
 //      Ollama). Model AI (vài trăm MB - vài GB) vẫn tải lần đầu mở app,
 //      nhưng qua UI onboarding có progress bar (xem app/api/server.py:
 //      /api/onboarding/prepare-ai), không phải lệnh CLI.
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
@@ -23,35 +26,99 @@ struct SidecarChildren {
     backend: Mutex<Option<CommandChild>>,
 }
 
+// QUAN TRỌNG: app_data_dir() của Tauri LUÔN nằm dưới hồ sơ người dùng
+// Windows (C:\Users\<tên>\AppData\Roaming\...), KHÔNG PHỤ THUỘC vào việc
+// người dùng cài app ở ổ nào (lỗi thật đã gặp: cài app ở ổ D: nhưng model
+// AI Ollama vẫn tải về ổ C: rồi báo hết dung lượng "not enough space on
+// disk") -- đây là quy ước chung của Windows/macOS/Linux, không phải bug
+// của app, nhưng gây khó cho người dùng có ổ C: nhỏ.
+//
+// Giải pháp: dùng 1 file "đánh dấu" nhỏ (data-location.txt, vài chục byte,
+// vẫn nằm ở app_data_dir -- không đáng kể) LƯU ĐƯỜNG DẪN THẬT mà người dùng
+// chọn qua màn hình Cài đặt. Nếu file này tồn tại và có nội dung, dùng
+// đường dẫn đó làm nơi lưu model AI + dữ liệu backend; nếu không, mặc định
+// vẫn dùng app_data_dir như cũ (không phá vỡ hành vi hiện tại).
+fn data_marker_path(app: &tauri::AppHandle) -> PathBuf {
+    let base = app
+        .path()
+        .app_data_dir()
+        .expect("Không lấy được thư mục dữ liệu app");
+    base.join("data-location.txt")
+}
+
+fn resolve_data_root(app: &tauri::AppHandle) -> PathBuf {
+    let marker = data_marker_path(app);
+    if let Ok(content) = fs::read_to_string(&marker) {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    app.path()
+        .app_data_dir()
+        .expect("Không lấy được thư mục dữ liệu app")
+}
+
+/// Cho màn hình Cài đặt hiển thị nơi đang lưu model AI + dữ liệu app.
+#[tauri::command]
+fn get_data_dir(app: tauri::AppHandle) -> String {
+    resolve_data_root(&app).to_string_lossy().to_string()
+}
+
+/// Mở hộp thoại chọn thư mục hệ điều hành, lưu lựa chọn vào file đánh dấu.
+/// CHỈ áp dụng cho lần khởi động app TIẾP THEO (2 sidecar đã khởi động sẵn
+/// với đường dẫn cũ lúc app đang mở) -- frontend nhắc người dùng khởi động
+/// lại app sau khi đổi. Dữ liệu/model đã tải ở vị trí CŨ không tự động di
+/// chuyển sang chỗ mới (tránh rủi ro copy nhầm/hỏng file nhiều GB) -- người
+/// dùng cần tự chuyển tay nếu muốn giữ lại, hoặc chấp nhận tải lại model.
+#[tauri::command]
+fn pick_data_dir(app: tauri::AppHandle) -> Option<String> {
+    let folder = app.dialog().file().blocking_pick_folder()?;
+    // .into_path() thay vì .to_string() -- chuyển đúng về PathBuf hệ điều
+    // hành (tránh trường hợp FilePath là dạng URL bị format khác đường dẫn
+    // thường), rồi mới đổi ra chuỗi để ghi vào file đánh dấu.
+    let path_str = folder.into_path().ok()?.to_string_lossy().to_string();
+    let marker = data_marker_path(&app);
+    if let Some(parent) = marker.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(&marker, &path_str).ok()?;
+    Some(path_str)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![get_data_dir, pick_data_dir])
         .setup(|app| {
             let shell = app.shell();
 
+            // Thư mục GỐC lưu dữ liệu (model Ollama + dữ liệu backend) --
+            // mặc định là app_data_dir (C:...), nhưng người dùng có thể đổi
+            // sang ổ khác qua màn hình Cài đặt (xem resolve_data_root ở trên,
+            // lỗi thật đã gặp: ổ C: hết dung lượng vì model AI + backend
+            // buộc phải nằm ở AppData bất kể cài app ở ổ nào).
+            let data_root = resolve_data_root(app.handle());
+
             // Thư mục lưu model Ollama tải về — phải là thư mục CÓ QUYỀN GHI
-            // (app data dir), không phải thư mục cài đặt app (thường chỉ đọc
+            // và ỔN ĐỊNH, không phải thư mục cài đặt app (thường chỉ đọc
             // trên Windows/macOS sau khi cài). Model tồn tại lại đây, không
             // đóng gói sẵn trong installer (xem docs/packaging-notes.md mục 3).
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("Không lấy được thư mục dữ liệu app");
-            let ollama_models_dir = app_data_dir.join("ollama-models");
+            let ollama_models_dir = data_root.join("ollama-models");
             std::fs::create_dir_all(&ollama_models_dir)
                 .expect("Không tạo được thư mục lưu model AI");
 
             // Thư mục dữ liệu của BACKEND (job đã lưu, file ghi âm upload,
             // file .docx xuất ra, settings.json) -- cùng lý do với
             // ollama_models_dir ở trên: phải là thư mục CÓ QUYỀN GHI và ỔN
-            // ĐỊNH (app_data_dir), không phải nơi backend.exe được giải nén
-            // ra chạy. Backend (xem backend/app/paths.py) đọc biến môi
-            // trường MEETING_DATA_DIR này; nếu thiếu, backend tự rơi về
-            // đường dẫn cạnh file code -- mà với PyInstaller --onefile đó là
-            // 1 thư mục TẠM bị xoá mỗi lần tắt app -> lỗi thật đã gặp: mất
-            // hết biên bản đã lưu + cài đặt sau khi tắt/mở lại app.
-            let backend_data_dir = app_data_dir.join("backend-data");
+            // ĐỊNH, không phải nơi backend.exe được giải nén ra chạy.
+            // Backend (xem backend/app/paths.py) đọc biến môi trường
+            // MEETING_DATA_DIR này; nếu thiếu, backend tự rơi về đường dẫn
+            // cạnh file code -- mà với PyInstaller --onefile đó là 1 thư mục
+            // TẠM bị xoá mỗi lần tắt app -> lỗi thật đã gặp: mất hết biên
+            // bản đã lưu + cài đặt sau khi tắt/mở lại app.
+            let backend_data_dir = data_root.join("backend-data");
             std::fs::create_dir_all(&backend_data_dir)
                 .expect("Không tạo được thư mục dữ liệu backend");
 
