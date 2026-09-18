@@ -231,11 +231,22 @@ function updateProgress(pct, stage, message) {
 
 // ---------- Màn hình kết quả ----------
 async function loadResults(jobId) {
-  const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
-  const job = await res.json();
-  state.currentJob = job;
-  renderResults(job);
-  showView("view-results");
+  // QUAN TRỌNG: bọc try/catch -- trước đây nếu fetch lỗi (vd job.json hỏng,
+  // backend chưa kịp khởi động), lỗi sẽ âm thầm biến mất (unhandled promise
+  // rejection) và màn hình KHÔNG chuyển sang view-results, KHÔNG báo gì cho
+  // người dùng biết -- trông y hệt "bấm không mở được".
+  try {
+    const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+    if (!res.ok) {
+      throw new Error(`Server trả về lỗi ${res.status}`);
+    }
+    const job = await res.json();
+    state.currentJob = job;
+    renderResults(job);
+    showView("view-results");
+  } catch (err) {
+    alert(`Không mở được biên bản này: ${err.message}`);
+  }
 }
 
 function renderResults(job) {
@@ -350,10 +361,25 @@ function renderLibrary(jobs) {
       </div>
       <div class="${statusClass}">${STAGE_LABELS[job.stage] || job.stage}</div>
     `;
+    // QUAN TRỌNG: trước đây chỉ xử lý click khi job.stage === "done" -- bấm
+    // vào job bị lỗi hoặc đang xử lý dở thì KHÔNG có phản ứng gì cả, không
+    // báo lý do -- đây chính là lỗi thật "không mở được mục trong thư viện"
+    // (thường xảy ra với các job còn sót lại từ lần chạy trước bị lỗi, hoặc
+    // job bị ngắt giữa chừng). Giờ bấm mục nào cũng có phản hồi rõ ràng.
     item.addEventListener("click", () => {
       if (job.stage === "done") {
         state.currentJobId = job.job_id;
         loadResults(job.job_id);
+      } else if (job.stage === "error") {
+        alert(
+          `Cuộc họp "${job.title}" xử lý bị lỗi:\n\n${job.error_message || "Không rõ nguyên nhân."}\n\n` +
+          `Bạn có thể xoá mục này và thử lại với file ghi âm gốc.`
+        );
+      } else {
+        alert(
+          `Cuộc họp "${job.title}" chưa xử lý xong (${STAGE_LABELS[job.stage] || job.stage}). ` +
+          `Nếu app đã đóng giữa chừng lúc xử lý, hãy thử tạo lại từ Trang chủ với file ghi âm gốc.`
+        );
       }
     });
     list.appendChild(item);
@@ -383,7 +409,49 @@ async function loadSettings() {
   }
   document.getElementById("select-ollama-model").value = state.settings.ollama_model_override || "";
   await renderOllamaModelCurrent();
+  await loadDataDirCurrent();
 }
+
+// ---------- Nơi lưu model AI + dữ liệu app ----------
+// Windows luôn lưu ở ổ C: (AppData) mặc định bất kể cài app ở ổ nào (lỗi
+// thật đã gặp: hết dung lượng ổ C: khi tải model AI ~1.4GB dù app cài ở ổ
+// D:). Gọi qua lệnh Tauri (invoke), KHÔNG qua backend Python -- vì đây là
+// đường dẫn Tauri tự quản lý cho 2 sidecar (main.rs), backend không biết gì
+// về việc này.
+function tauriInvoke(cmd, args) {
+  // withGlobalTauri: true trong tauri.conf.json -> window.__TAURI__ luôn có
+  // sẵn trong app đóng gói thật. Kiểm tra tồn tại phòng trường hợp mở thẳng
+  // file HTML này bằng trình duyệt thường lúc dev/test giao diện (không có
+  // Tauri) -- tránh lỗi "window.__TAURI__ undefined" chặn cả trang.
+  if (!window.__TAURI__) return Promise.reject(new Error("Không chạy trong Tauri"));
+  return window.__TAURI__.core.invoke(cmd, args);
+}
+
+async function loadDataDirCurrent() {
+  const el = document.getElementById("data-dir-current");
+  if (!el) return;
+  try {
+    el.textContent = await tauriInvoke("get_data_dir");
+  } catch {
+    el.textContent = "(không xác định)";
+  }
+}
+
+document.getElementById("btn-change-data-dir")?.addEventListener("click", async () => {
+  const note = document.getElementById("data-dir-note");
+  try {
+    const newPath = await tauriInvoke("pick_data_dir");
+    if (!newPath) return; // người dùng bấm Huỷ trong hộp thoại chọn thư mục
+    await loadDataDirCurrent();
+    note.textContent =
+      `Đã đổi. Dữ liệu CŨ (model AI đã tải, biên bản đã lưu...) vẫn nằm ở vị trí trước đó, không tự chuyển. ` +
+      `Đóng hẳn app rồi mở lại để dùng thư mục mới — nếu chưa có model AI ở đó, app sẽ tải lại.`;
+    note.classList.remove("hidden");
+  } catch (err) {
+    note.textContent = `Không đổi được thư mục: ${err.message || err}`;
+    note.classList.remove("hidden");
+  }
+});
 
 async function renderOllamaModelCurrent() {
   const box = document.getElementById("ollama-model-current");
