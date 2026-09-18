@@ -8,8 +8,10 @@
     "devUrl": "http://localhost:1420"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Biên Bản Họp — Chạy Local",
         "width": 1100,
         "height": 760,
