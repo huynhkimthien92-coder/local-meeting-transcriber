@@ -45,7 +45,7 @@ def load_settings() -> AppSettings:
     if not SETTINGS_PATH.exists():
         return AppSettings()
     try:
-        data = json.loads(SETTINGS_PATH.read_text())
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         return AppSettings(**data)
     except (json.JSONDecodeError, TypeError):
         return AppSettings()
@@ -53,4 +53,12 @@ def load_settings() -> AppSettings:
 
 def save_settings(settings: AppSettings) -> None:
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2))
+    # QUAN TRỌNG: PHẢI chỉ định encoding="utf-8" tường minh. Nếu không,
+    # Python trên Windows sẽ dùng bảng mã mặc định của hệ thống (thường là
+    # cp1252, không có tiếng Việt) để ghi/đọc file -> lỗi thật đã gặp:
+    # "UnicodeEncodeError: 'charmap' codec can't encode character..." khi
+    # tiêu đề cuộc họp hoặc nội dung có dấu tiếng Việt (vd "ộ", "ế"...).
+    # Trên Linux/macOS mặc định đã là UTF-8 nên không lộ lỗi lúc test ở đó.
+    SETTINGS_PATH.write_text(
+        json.dumps(asdict(settings), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
