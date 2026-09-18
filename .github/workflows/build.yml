@@ -39,6 +39,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Giải phóng dung lượng đĩa (chỉ Linux)
+        # Máy ảo Ubuntu của GitHub cài sẵn nhiều thứ không dùng tới trong dự
+        # án này (Android SDK, .NET, GHC, cache Docker...) chiếm hàng chục GB.
+        # PyInstaller đóng gói các gói AI nặng (torch, pyannote.audio...)
+        # thành 1 file cần khá nhiều dung lượng tạm lúc build -> dễ hết chỗ
+        # nếu không dọn trước (lỗi thật đã gặp: "No space left on device").
+        # Windows/macOS runner của GitHub có sẵn nhiều đĩa trống hơn nên
+        # không cần bước này.
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af || true
+          df -h /
+
       - name: Cài Rust
         uses: dtolnay/rust-toolchain@stable
 
