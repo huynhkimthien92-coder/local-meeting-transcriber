@@ -70,8 +70,7 @@ Nếu không đủ rõ để xác định người phụ trách hoặc hạn ch�
 # gặp: biên bản ra "quá sơ sài và sai" dù transcript gốc đầy đủ. Giải pháp:
 # chia transcript thành từng đoạn nhỏ (đủ nằm gọn trong cửa sổ ngữ cảnh kể
 # cả với model nhỏ 1B dùng cho máy không GPU, xem hardware.py), tóm tắt
-# riêng từng đoạn ("map"), rồi tóm tắt LẦN NỮA từ các đoạn đã tóm tắt để ra
-# biên bản cuối ("reduce") -- không đoạn nào của cuộc họp bị bỏ sót.
+# riêng từng đoạn ("map").
 CHUNK_CHAR_LIMIT = 6000  # ~1500 từ tiếng Việt mỗi đoạn
 
 CHUNK_DIGEST_PROMPT_TEMPLATE = """\
@@ -83,6 +82,78 @@ có). KHÔNG bịa thêm, KHÔNG cố tóm tắt cả cuộc họp — chỉ đo
 --- ĐOẠN TRANSCRIPT ---
 {chunk}
 --- HẾT ĐOẠN ---
+"""
+
+# QUAN TRỌNG (lỗi thật đã gặp lần 2, sau khi đã sửa lỗi cắt context ở trên):
+# dù prompt cuối đã nằm gọn trong cửa sổ ngữ cảnh (vd chỉ ~2000 token), model
+# NHỎ (llama3.2:1b, dùng cho máy yếu không GPU) vẫn có thể "bỏ cuộc" giữa
+# chừng khi phải viết LẠI TOÀN BỘ biên bản có cấu trúc (4 phần) từ nhiều
+# đoạn digest cùng lúc -- log thực tế cho thấy model chỉ sinh ra ĐÚNG 68
+# token rồi dừng hẳn (không phải do timeout/cắt context), ra một đoạn văn
+# ngắn, lạc đề, không liên quan tới nội dung cuộc họp. Đây là giới hạn khả
+# năng làm theo hướng dẫn phức tạp của model 1B, không phải lỗi code.
+#
+# Giải pháp: KHÔNG giao cho model việc viết lại toàn bộ nội dung -- phần
+# "Nội dung trao đổi chính" (phần quan trọng nhất, hay bị "quá sơ sài" nhất)
+# được GHÉP TRỰC TIẾP từ các đoạn digest đã tóm tắt ở bước map, không qua
+# model nữa -- luôn đầy đủ, không bao giờ bị model làm hỏng/bỏ sót. Model chỉ
+# còn phải làm việc NHẸ hơn nhiều: rút ra Mục tiêu / Quyết định / Việc cần
+# làm từ các đoạn digest đó -- và nếu model vẫn không theo đúng format (ví
+# dụ lại bỏ cuộc sớm), có phần dự phòng để biên bản KHÔNG BAO GIỜ chỉ còn 1
+# đoạn văn ngắn/lạc đề như đã gặp -- tệ nhất là thiếu vài dòng, chứ nội dung
+# chính vẫn luôn đầy đủ và đúng.
+FINAL_SYNTHESIS_PROMPT_TEMPLATE = """\
+Dưới đây là các đoạn tóm tắt (mỗi đoạn ứng với 1 phần của MỘT cuộc họp dài, \
+đánh số theo đúng thứ tự thời gian đã diễn ra). Dựa vào TOÀN BỘ các đoạn \
+này, hãy viết đúng 3 phần sau bằng tiếng Việt, dùng markdown, PHẢI có đủ \
+3 tiêu đề bắt đầu bằng "##" đúng như dưới đây, KHÔNG viết thêm phần nào khác \
+và KHÔNG liệt kê lại chi tiết nội dung (phần đó đã có sẵn ở chỗ khác):
+
+## Mục tiêu cuộc họp
+(1-2 câu, suy ra từ toàn bộ các đoạn tóm tắt)
+
+## Quyết định
+(gạch đầu dòng các quyết định đã chốt, xuyên suốt tất cả các đoạn — nếu \
+không có quyết định nào rõ ràng thì ghi "Không có quyết định cụ thể được chốt")
+
+## Việc cần làm
+(liệt kê dạng bảng: Việc cần làm | Người phụ trách | Hạn chót (nếu có nhắc đến) \
+— nếu không có việc cụ thể nào thì ghi 1 dòng "Không có việc cụ thể được giao | chưa rõ | chưa rõ")
+
+Chỉ dựa trên nội dung đã cho, KHÔNG bịa thêm thông tin không có trong đó.
+
+--- CÁC ĐOẠN TÓM TẮT ---
+{condensed}
+--- HẾT ---
+"""
+
+# Dùng khi cuộc họp NGẮN (không cần chia đoạn) -- vẫn giữ prompt đầy đủ 4
+# phần như cũ vì lúc này model chỉ phải đọc transcript gốc 1 lần, việc nhẹ
+# hơn nhiều so với việc phải "viết lại" từ nhiều đoạn digest đã tóm tắt.
+MEETING_MINUTES_PROMPT_TEMPLATE = """\
+Bạn là trợ lý thư ký chuyên nghiệp. Dưới đây là bản ghi lời nói (transcript) \
+của một cuộc họp, đã có tên người nói. Hãy viết biên bản cuộc họp CHUẨN, \
+súc tích, bằng tiếng Việt, theo đúng cấu trúc sau (dùng markdown):
+
+## Mục tiêu cuộc họp
+(1-2 câu tóm tắt mục tiêu chính, suy ra từ nội dung trao đổi)
+
+## Nội dung trao đổi chính
+(gạch đầu dòng các điểm quan trọng đã bàn, theo thứ tự thời gian, bao quát \
+TOÀN BỘ nội dung đã cho, không chỉ phần đầu)
+
+## Quyết định
+(gạch đầu dòng các quyết định đã chốt trong cuộc họp — nếu không có quyết định nào rõ ràng thì ghi "Không có quyết định cụ thể được chốt")
+
+## Việc cần làm
+(liệt kê dạng bảng: Việc cần làm | Người phụ trách | Hạn chót (nếu có nhắc đến))
+
+Chỉ dựa trên nội dung đã cho, KHÔNG bịa thêm thông tin không có trong đó. \
+Nếu không đủ rõ để xác định người phụ trách hoặc hạn chót, ghi "chưa rõ".
+
+--- NỘI DUNG ---
+{transcript}
+--- HẾT NỘI DUNG ---
 """
 
 
@@ -111,6 +182,34 @@ def _split_transcript_into_chunks(transcript_text: str, limit: int = CHUNK_CHAR_
     if current:
         chunks.append("\n".join(current))
     return chunks or [transcript_text]
+
+
+def _extract_section(text: str, keyword: str) -> str | None:
+    """Tìm đoạn bắt đầu từ dòng heading có chứa `keyword` (không phân biệt
+    hoa/thường, chấp nhận cả dạng model tự ý dùng "**Tiêu đề:**" thay vì
+    "## Tiêu đề") tới heading tiếp theo hoặc hết văn bản. Trả None nếu không
+    tìm thấy -- dùng để phát hiện khi model nhỏ KHÔNG theo đúng format yêu
+    cầu (lỗi thật đã gặp: model 1B bỏ cuộc giữa chừng, ra 1 đoạn văn ngắn
+    không có tiêu đề nào), để còn có fallback an toàn thay vì hiển thị
+    nguyên văn kết quả sai/thiếu đó cho người dùng."""
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        is_heading = stripped.startswith("#") or (stripped.startswith("**") and "*" in stripped[2:])
+        if is_heading and keyword.lower() in stripped.lower():
+            start = i
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        s = lines[j].strip()
+        if s.startswith("#") or (s.startswith("**") and "*" in s[2:]):
+            end = j
+            break
+    section = "\n".join(lines[start:end]).strip()
+    return section or None
 
 
 def _ollama_generate(model: str, prompt: str, on_progress: Callable[[float], None] | None = None) -> str:
@@ -197,38 +296,85 @@ def summarize_meeting(
 
     if len(chunks) <= 1:
         # Cuộc họp ngắn, transcript đã nằm gọn trong 1 đoạn -- không cần
-        # bước "map" trung gian, tóm tắt thẳng như trước (nhanh hơn).
-        condensed = transcript_text
-        base_pct = 15.0
-    else:
-        digests: list[str] = []
-        n = len(chunks)
-        for i, chunk in enumerate(chunks):
+        # bước "map" trung gian, tóm tắt thẳng như trước (nhanh hơn, và model
+        # chỉ phải đọc + viết 1 lần nên ít rủi ro "bỏ cuộc" hơn).
+        if on_progress:
+            on_progress(15.0, f"Đang tổng hợp biên bản bằng {ollama_model}...")
+
+        def _short_progress(pct: float) -> None:
             if on_progress:
-                on_progress(15.0 + (i / n) * 55.0, f"Đang đọc phần {i + 1}/{n} cuộc họp...")
-            digest = _ollama_generate(
-                ollama_model, CHUNK_DIGEST_PROMPT_TEMPLATE.format(chunk=chunk)
-            )
-            digests.append(f"[Phần {i + 1}/{n}]\n{digest}")
-        condensed = "\n\n".join(digests)
-        base_pct = 70.0
+                on_progress(15.0 + (pct / 100.0) * 85.0, "Đang sinh biên bản...")
 
+        full_text = _ollama_generate(
+            ollama_model,
+            MEETING_MINUTES_PROMPT_TEMPLATE.format(transcript=transcript_text),
+            on_progress=_short_progress,
+        )
+        if on_progress:
+            on_progress(100, "Hoàn tất biên bản")
+        if not full_text.strip():
+            raise SummarizeError("Ollama trả về kết quả rỗng — thử lại hoặc đổi model.")
+        return full_text
+
+    # Cuộc họp dài -- bước "map": tóm tắt riêng từng đoạn.
+    digests: list[str] = []
+    n = len(chunks)
+    for i, chunk in enumerate(chunks):
+        if on_progress:
+            on_progress(15.0 + (i / n) * 55.0, f"Đang đọc phần {i + 1}/{n} cuộc họp...")
+        digest = _ollama_generate(
+            ollama_model, CHUNK_DIGEST_PROMPT_TEMPLATE.format(chunk=chunk)
+        )
+        if not digest or len(digest) < 15:
+            # Model không tóm tắt được đoạn này (hiếm, nhưng không được để
+            # mất trắng nội dung đoạn đó khỏi biên bản) -- vẫn giữ nguyên
+            # văn transcript gốc của đoạn làm "digest" thay thế.
+            digest = chunk
+        digests.append(f"**Phần {i + 1}/{n}**\n{digest}")
+    condensed = "\n\n".join(digests)
+
+    # "Nội dung trao đổi chính" GHÉP TRỰC TIẾP từ các đoạn digest -- KHÔNG
+    # qua thêm 1 lần gọi model nữa để "viết lại toàn bộ", vì đó chính xác là
+    # bước model nhỏ (1B) đã bỏ cuộc giữa chừng trong lần gặp lỗi thật. Ghép
+    # trực tiếp đảm bảo phần quan trọng nhất của biên bản luôn đầy đủ, đúng
+    # thứ tự, không phụ thuộc khả năng model.
+    content_section = "## Nội dung trao đổi chính\n" + condensed
+
+    base_pct = 70.0
     if on_progress:
-        on_progress(base_pct, f"Đang tổng hợp biên bản bằng {ollama_model}...")
+        on_progress(base_pct, f"Đang tổng hợp mục tiêu/quyết định bằng {ollama_model}...")
 
-    prompt = MEETING_MINUTES_PROMPT_TEMPLATE.format(transcript=condensed)
     remaining = 100.0 - base_pct
 
     def _final_progress(pct: float) -> None:
         if on_progress:
-            on_progress(base_pct + (pct / 100.0) * remaining, "Đang sinh biên bản...")
+            on_progress(base_pct + (pct / 100.0) * remaining, "Đang tổng hợp biên bản...")
 
-    full_text = _ollama_generate(ollama_model, prompt, on_progress=_final_progress)
+    synth_prompt = FINAL_SYNTHESIS_PROMPT_TEMPLATE.format(condensed=condensed)
+    synth_text = _ollama_generate(ollama_model, synth_prompt, on_progress=_final_progress)
+
+    muc_tieu_section = _extract_section(synth_text, "Mục tiêu")
+    quyet_dinh_section = _extract_section(synth_text, "Quyết định")
+    viec_can_lam_section = _extract_section(synth_text, "Việc cần làm")
+
+    # Dự phòng: nếu model không theo đúng format (kể cả bỏ cuộc/ra nội dung
+    # lạc đề như lỗi thật đã gặp), KHÔNG hiển thị nguyên văn kết quả sai đó
+    # -- dùng câu mặc định rõ ràng, để người dùng biết phần này chưa tự động
+    # trích xuất được, thay vì đọc nhầm 1 đoạn văn không liên quan.
+    if not muc_tieu_section:
+        muc_tieu_section = (
+            "## Mục tiêu cuộc họp\n"
+            "(Không tự động tóm tắt được mục tiêu — xem phần Nội dung trao đổi chính bên dưới.)"
+        )
+    if not quyet_dinh_section:
+        quyet_dinh_section = (
+            "## Quyết định\n"
+            "Không tự động trích xuất được — xem phần Nội dung trao đổi chính bên dưới."
+        )
+    if not viec_can_lam_section:
+        viec_can_lam_section = "## Việc cần làm\nchưa rõ"
 
     if on_progress:
         on_progress(100, "Hoàn tất biên bản")
 
-    if not full_text.strip():
-        raise SummarizeError("Ollama trả về kết quả rỗng — thử lại hoặc đổi model.")
-
-    return full_text
+    return f"{muc_tieu_section}\n\n{content_section}\n\n{quyet_dinh_section}\n\n{viec_can_lam_section}"
