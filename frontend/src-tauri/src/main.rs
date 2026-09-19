@@ -122,6 +122,25 @@ fn main() {
             std::fs::create_dir_all(&backend_data_dir)
                 .expect("Không tạo được thư mục dữ liệu backend");
 
+            // QUAN TRỌNG: "meeting-backend" là file đóng gói kiểu PyInstaller
+            // --onefile -- MỖI LẦN CHẠY, nó phải tự giải nén ra 1 thư mục
+            // tạm trước khi thực thi. Windows mặc định LUÔN đặt thư mục tạm
+            // này ở %TEMP% của hồ sơ người dùng, tức LUÔN nằm trên ổ C: --
+            // HOÀN TOÀN không phụ thuộc vào việc người dùng đã đổi nơi lưu
+            // model/dữ liệu sang ổ khác qua Cài đặt hay chưa. Đây là nguyên
+            // nhân lỗi thật đã gặp dù đã đổi ổ lưu trữ:
+            // "[PYI-13872:ERROR] Failed to create parent directory
+            // structure" / "There is not enough space on the disk" -- ổ C:
+            // vẫn phải chịu tải giải nén backend (có thể vài trăm MB - vài
+            // GB do kèm torch/pyannote/whisper) mỗi lần mở app.
+            // PyInstaller onefile đọc biến môi trường TEMP/TMP để biết giải
+            // nén vào đâu -- trỏ 2 biến này sang thư mục con trong data_root
+            // (ổ người dùng đã chọn) TRƯỚC khi khởi động backend là cách
+            // chính thức để đổi hẳn luôn chỗ giải nén này sang ổ khác.
+            let backend_temp_dir = data_root.join("backend-temp");
+            std::fs::create_dir_all(&backend_temp_dir)
+                .expect("Không tạo được thư mục tạm cho backend");
+
             // "ollama" là binary Ollama gốc (tải từ ollama.com/download, đổi
             // tên theo target triple), khai báo trong tauri.conf.json ->
             // bundle.externalBin, y hệt cách làm với meeting-backend.
@@ -187,6 +206,8 @@ fn main() {
                 .expect("Không tìm thấy sidecar meeting-backend — chạy scripts/build_backend.sh trước")
                 .env("PYTHONUTF8", "1")
                 .env("MEETING_DATA_DIR", backend_data_dir.to_string_lossy().to_string())
+                .env("TEMP", backend_temp_dir.to_string_lossy().to_string())
+                .env("TMP", backend_temp_dir.to_string_lossy().to_string())
                 .spawn()
                 .expect("Không khởi động được backend local");
 
