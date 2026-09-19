@@ -13,7 +13,7 @@ Chọn faster-whisper thay vì openai-whisper gốc vì:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Callable
 
 from .models import TranscriptSegment
 
@@ -28,6 +28,21 @@ class TranscribeResult:
     segments: list[TranscriptSegment]
     detected_language: str
     duration_seconds: float
+
+
+SAMPLE_RATE = 16000
+
+# QUAN TRỌNG: xử lý audio theo từng đoạn ~10 phút một, KHÔNG đưa nguyên cả
+# file dài (vd cuộc họp 50-60 phút) vào Whisper trong 1 lần. Lỗi thật đã
+# gặp trên máy 8GB RAM: "Unable to allocate 890 MiB for an array with
+# shape (1, 290344, 201) and data type complex128" -- đây là MemoryError
+# khi faster-whisper tính phổ tần số (spectrogram) cho TOÀN BỘ audio cùng
+# lúc trước khi chia nhỏ để nhận diện; mảng tạm này nặng tỉ lệ thuận với
+# độ dài file, không phụ thuộc kích thước model. Cắt nhỏ MẢNG SỐ đã giải
+# mã (không phải cắt file) thành từng đoạn rồi transcribe riêng từng đoạn
+# giúp mỗi lần chỉ cần RAM tương ứng đoạn đó.
+CHUNK_SECONDS = 600.0  # ~10 phút mỗi đoạn
+MIN_CHUNK_SECONDS = 10.0  # chia nhỏ tới mức này thì thôi, báo lỗi rõ ràng
 
 
 def transcribe_audio(
@@ -63,40 +78,99 @@ def transcribe_audio(
         ) from e
 
     if on_progress:
-        on_progress(5, "Đang phân tích audio...")
+        on_progress(2, "Đang đọc file audio...")
 
+    # Tự giải mã audio ra mảng số 1 lần bằng chính hàm của faster-whisper
+    # (decode_audio) -- bước NÀY an toàn về RAM kể cả file dài (giải mã
+    # tuần tự bằng ffmpeg/libav, không tính spectrogram). Chỉ bước tính
+    # spectrogram bên trong model.transcribe() mới cần chia nhỏ.
     try:
-        segments_iter, info = model.transcribe(
-            audio_path,
-            vad_filter=True,               # bỏ qua khoảng lặng -> nhanh hơn cho cuộc họp dài
-            vad_parameters=dict(min_silence_duration_ms=500),
-            word_timestamps=False,
-        )
+        from faster_whisper.audio import decode_audio
+        full_audio = decode_audio(audio_path, sampling_rate=SAMPLE_RATE)
     except Exception as e:
         raise TranscribeError(
             f"Không xử lý được file audio. Kiểm tra file có đúng định dạng "
             f"(mp3, wav, m4a...) và không bị hỏng. Chi tiết: {e}"
         ) from e
 
-    duration = info.duration or 1.0
-    result_segments: list[TranscriptSegment] = []
+    total_samples = len(full_audio)
+    duration = (total_samples / SAMPLE_RATE) if total_samples else 1.0
 
-    for seg in segments_iter:
-        result_segments.append(
-            TranscriptSegment(start=seg.start, end=seg.end, text=seg.text.strip())
-        )
+    if on_progress:
+        on_progress(5, "Đang phân tích audio...")
+
+    chunk_samples = int(CHUNK_SECONDS * SAMPLE_RATE)
+    min_chunk_samples = int(MIN_CHUNK_SECONDS * SAMPLE_RATE)
+    result_segments: list[TranscriptSegment] = []
+    detected_language = "vi"
+
+    offset_samples = 0
+    while offset_samples < total_samples:
+        offset_seconds = offset_samples / SAMPLE_RATE
+        attempt_samples = min(chunk_samples, total_samples - offset_samples)
+        last_error: Exception | None = None
+        segments_list = None
+        info = None
+
+        # Nếu vẫn hết RAM ngay cả với đoạn hiện tại (máy quá yếu hoặc đang
+        # bị chiếm dụng bởi app khác) -> tự giảm nửa kích thước đoạn rồi
+        # thử lại vài lần, thay vì để cả job thất bại ngay lập tức.
+        while True:
+            attempt_chunk = full_audio[offset_samples: offset_samples + attempt_samples]
+            try:
+                segments_iter, info = model.transcribe(
+                    attempt_chunk,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500),
+                    word_timestamps=False,
+                )
+                segments_list = list(segments_iter)
+                last_error = None
+                break
+            except MemoryError as e:
+                last_error = e
+                if attempt_samples <= min_chunk_samples:
+                    break
+                attempt_samples = max(attempt_samples // 2, min_chunk_samples)
+            except Exception as e:
+                raise TranscribeError(
+                    f"Không xử lý được file audio. Kiểm tra file có đúng định dạng "
+                    f"(mp3, wav, m4a...) và không bị hỏng. Chi tiết: {e}"
+                ) from e
+
+        if last_error is not None:
+            raise TranscribeError(
+                "Máy hết bộ nhớ (RAM) khi xử lý file audio này, kể cả sau khi đã "
+                "tự chia nhỏ đoạn xử lý. Hãy đóng bớt ứng dụng khác (đặc biệt "
+                "trình duyệt) hoặc khởi động lại máy để giải phóng RAM rồi thử "
+                f"lại. Chi tiết kỹ thuật: {last_error}"
+            )
+
+        for seg in segments_list:
+            result_segments.append(
+                TranscriptSegment(
+                    start=offset_seconds + seg.start,
+                    end=offset_seconds + seg.end,
+                    text=seg.text.strip(),
+                )
+            )
+        if info is not None and info.language:
+            detected_language = info.language
+
+        offset_samples += attempt_samples
         if on_progress:
-            # Whisper xử lý tuần tự theo thời gian audio -> seg.end / duration
+            # Whisper xử lý tuần tự theo thời gian audio -> tỉ lệ đã xử lý
             # là ước tính % khá sát thực tế, không phải giả lập.
-            pct = min(95.0, 5 + (seg.end / duration) * 90)
-            on_progress(pct, f"Đang nhận diện lời nói... {int(seg.end)}s / {int(duration)}s")
+            done_seconds = min(offset_samples / SAMPLE_RATE, duration)
+            pct = min(95.0, 5 + (done_seconds / duration) * 90)
+            on_progress(pct, f"Đang nhận diện lời nói... {int(done_seconds)}s / {int(duration)}s")
 
     if on_progress:
         on_progress(100, "Hoàn tất nhận diện lời nói")
 
     return TranscribeResult(
         segments=result_segments,
-        detected_language=info.language,
+        detected_language=detected_language,
         duration_seconds=duration,
     )
 
