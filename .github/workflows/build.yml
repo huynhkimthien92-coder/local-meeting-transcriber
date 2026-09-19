@@ -111,7 +111,12 @@ jobs:
           # "[ONNXRuntimeError]... Load model ...silero_vad_v6.onnx failed.
           # File doesn't exist". Cờ này bảo PyInstaller gói kèm TOÀN BỘ file
           # dữ liệu đi cùng thư viện faster_whisper, không riêng code.
-          pyinstaller --onefile --name meeting-backend --collect-data faster_whisper run_server.py
+          # Tương tự, pyannote.audio (nhận diện người nói) cũng có file dữ
+          # liệu không phải code nằm trong thư viện (vd "telemetry/config.yaml")
+          # mà PyInstaller không tự gói -- lỗi thật đã gặp:
+          # "[Errno 2] No such file or directory: ...pyannote\audio\telemetry
+          # \config.yaml". Thêm --collect-data pyannote để gói kèm luôn.
+          pyinstaller --onefile --name meeting-backend --collect-data faster_whisper --collect-data pyannote run_server.py
           mkdir -p ../frontend/src-tauri/binaries
           BIN="dist/meeting-backend"
           [ -f "dist/meeting-backend.exe" ] && BIN="dist/meeting-backend.exe"
