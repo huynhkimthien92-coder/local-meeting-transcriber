@@ -189,6 +189,31 @@
         <button id="btn-save-ollama-model" class="btn-secondary">Lưu lựa chọn</button>
       </div>
 
+      <!-- Model nhận diện lời nói (Whisper) -- mặc định app tự chọn nhỏ để
+           ưu tiên tốc độ trên máy không GPU, có thể sai vài từ với thuật
+           ngữ chuyên ngành/trang trọng (vd họp Quốc hội). Cho phép đổi sang
+           model lớn hơn để chính xác hơn, đánh đổi bằng thời gian xử lý. -->
+      <div class="card" style="margin-top: 16px;">
+        <h2>Model nhận diện lời nói</h2>
+        <div class="muted small" id="whisper-model-current"></div>
+        <div class="info-box">
+          Model càng lớn thì nhận diện càng chính xác (đỡ sai từ, nhất là với
+          thuật ngữ chuyên ngành/trang trọng), nhưng càng chậm trên máy không
+          có GPU — model "medium" có thể chậm hơn "small" nhiều lần.
+        </div>
+        <label class="field">
+          <span>Chọn model</span>
+          <select id="select-whisper-model" class="field-input">
+            <option value="">Tự động (khuyến nghị theo máy)</option>
+            <option value="tiny">tiny — nhanh nhất, dễ sai nhiều</option>
+            <option value="base">base — nhanh, độ chính xác cơ bản</option>
+            <option value="small">small — cân bằng</option>
+            <option value="medium">medium — chính xác nhất, rất chậm nếu không có GPU</option>
+          </select>
+        </label>
+        <button id="btn-save-whisper-model" class="btn-secondary">Lưu lựa chọn</button>
+      </div>
+
       <!-- Nơi lưu model AI + dữ liệu app -- mặc định Windows luôn lưu ở ổ C:
            (AppData) bất kể cài app ở ổ nào, dễ hết dung lượng vì model AI có
            thể nặng vài GB. Cho phép đổi sang ổ khác nếu ổ C: chật. -->

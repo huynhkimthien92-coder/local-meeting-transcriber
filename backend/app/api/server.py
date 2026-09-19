@@ -129,6 +129,18 @@ def set_ollama_model_override(model: str = Form("")):
     return settings.to_dict()
 
 
+@app.post("/api/settings/whisper-model")
+def set_whisper_model_override(model: str = Form("")):
+    """Cho người dùng nâng cao tự chọn model nhận diện lời nói (Whisper)
+    chính xác hơn (chậm hơn nhiều trên máy không GPU) thay vì model app tự
+    đề xuất theo máy. Gửi chuỗi rỗng để xoá ghi đè, quay về dùng đề xuất tự
+    động (mặc định ưu tiên tốc độ, xem pipeline/hardware.py)."""
+    settings = load_settings()
+    settings.whisper_model_override = model.strip() or None
+    save_settings(settings)
+    return settings.to_dict()
+
+
 @app.post("/api/settings/hf-token")
 def set_hf_token(hf_token: str = Form(...)):
     """Lưu token sau khi người dùng dán vào ở bước cuối luồng hướng dẫn."""
@@ -179,14 +191,16 @@ async def create_job(
     hw = detect_hardware()
     rec = recommend_models(hw)
     settings = load_settings()
-    # Người dùng nâng cao có thể tự đổi model tóm tắt (chậm hơn, chất lượng
-    # cao hơn) trong Cài đặt — nếu không đổi gì thì dùng đúng đề xuất theo
-    # máy (mặc định ưu tiên tốc độ khi không có GPU, xem hardware.py).
+    # Người dùng nâng cao có thể tự đổi model tóm tắt / model nhận diện lời
+    # nói (chậm hơn, chất lượng cao hơn) trong Cài đặt — nếu không đổi gì
+    # thì dùng đúng đề xuất theo máy (mặc định ưu tiên tốc độ khi không có
+    # GPU, xem hardware.py).
     ollama_model = settings.ollama_model_override or rec.ollama_model
+    whisper_model = settings.whisper_model_override or rec.whisper_model
 
     job = MeetingJob.new(
         source_audio_path=str(dest_path), title=title,
-        whisper_model=rec.whisper_model, ollama_model=ollama_model,
+        whisper_model=whisper_model, ollama_model=ollama_model,
     )
     store.save(job)
 

@@ -152,7 +152,13 @@ async function handleFileSelected(file) {
   // họ bấm xong rồi mới biết phải chờ bao lâu.
   const durationSec = await getAudioDuration(file);
   try {
-    const res = await fetch(`${API_BASE}/api/estimate?duration_seconds=${durationSec}`);
+    // Dùng đúng model Whisper sẽ thực sự chạy (tự chọn theo máy hoặc người
+    // dùng đã ghi đè trong Cài đặt) để ước tính thời gian sát thực tế hơn --
+    // model lớn hơn (vd "medium") chậm hơn nhiều so với mặc định "small".
+    const whisperModel = state.settings?.whisper_model_override || "small";
+    const res = await fetch(
+      `${API_BASE}/api/estimate?duration_seconds=${durationSec}&whisper_model=${encodeURIComponent(whisperModel)}`
+    );
     const data = await res.json();
     const mins = Math.round(data.estimated_seconds / 60);
     box.textContent = `File dài khoảng ${Math.round(durationSec / 60)} phút. Ước tính xử lý mất khoảng ${mins} phút.`;
@@ -409,6 +415,8 @@ async function loadSettings() {
   }
   document.getElementById("select-ollama-model").value = state.settings.ollama_model_override || "";
   await renderOllamaModelCurrent();
+  document.getElementById("select-whisper-model").value = state.settings.whisper_model_override || "";
+  await renderWhisperModelCurrent();
   await loadDataDirCurrent();
 }
 
@@ -475,6 +483,30 @@ document.getElementById("btn-save-ollama-model").addEventListener("click", async
   const res = await fetch(`${API_BASE}/api/settings/ollama-model`, { method: "POST", body: form });
   state.settings = await res.json();
   await renderOllamaModelCurrent();
+});
+
+async function renderWhisperModelCurrent() {
+  const box = document.getElementById("whisper-model-current");
+  if (!box) return;
+  if (state.settings.whisper_model_override) {
+    box.textContent = `Đang dùng: ${state.settings.whisper_model_override} (tự chọn, ghi đè đề xuất tự động).`;
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/hardware`);
+    const data = await res.json();
+    box.textContent = `Đang dùng: ${data.recommendation.whisper_model} (tự động, theo cấu hình máy này).`;
+  } catch {
+    box.textContent = "Đang dùng: tự động theo cấu hình máy.";
+  }
+}
+
+document.getElementById("btn-save-whisper-model").addEventListener("click", async () => {
+  const model = document.getElementById("select-whisper-model").value;
+  const form = new URLSearchParams({ model });
+  const res = await fetch(`${API_BASE}/api/settings/whisper-model`, { method: "POST", body: form });
+  state.settings = await res.json();
+  await renderWhisperModelCurrent();
 });
 
 document.getElementById("toggle-diarization").addEventListener("change", async (e) => {

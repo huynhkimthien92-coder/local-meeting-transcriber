@@ -34,6 +34,12 @@ class AppSettings:
     # bản chi tiết hơn và chấp nhận chờ lâu hơn có thể tự chọn model lớn hơn
     # (vd. "llama3.2:3b", "qwen2.5:7b") trong màn hình Cài đặt.
     ollama_model_override: str | None = None
+    # Ghi đè model nhận diện lời nói (Whisper) mà app tự đề xuất theo phần
+    # cứng — None nghĩa là "dùng đề xuất tự động" (mặc định ưu tiên tốc độ
+    # trên máy không GPU, xem pipeline/hardware.py). Model lớn hơn (vd
+    # "medium") nhận diện chính xác hơn, đặc biệt với thuật ngữ chuyên
+    # ngành/trang trọng, nhưng chạy chậm hơn nhiều trên CPU.
+    whisper_model_override: str | None = None
 
     def to_dict(self, mask_token: bool = True) -> dict:
         d = asdict(self)
