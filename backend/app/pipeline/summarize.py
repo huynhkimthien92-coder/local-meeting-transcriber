@@ -13,6 +13,7 @@ import json
 
 import requests
 
+from . import ollama_manager
 from .models import TranscriptSegment
 
 # Cổng RIÊNG (không dùng 11434 mặc định của Ollama) -- khớp với
@@ -79,8 +80,33 @@ def summarize_meeting(
     transcript_text = format_transcript_for_prompt(segments)
     prompt = MEETING_MINUTES_PROMPT_TEMPLATE.format(transcript=transcript_text)
 
+    # QUAN TRỌNG: KHÔNG được giả định model đã có sẵn ở đây. Màn hình Cài đặt
+    # ("Lưu lựa chọn" model tóm tắt) chỉ LƯU TÊN model người dùng chọn, không
+    # tự tải về -- model chỉ thực sự được tải đúng 1 lần lúc onboarding, cho
+    # ĐÚNG model được đề xuất lúc đó. Nếu người dùng đổi sang model khác sau
+    # onboarding (hoặc đổi ổ lưu trữ khiến model cũ không còn thấy nữa), model
+    # mới/đang trỏ tới chưa từng được tải -> lỗi thật đã gặp: "Model
+    # 'llama3.2:1b' có thể chưa được tải về máy... 404 Client Error: Not
+    # Found for url: .../api/generate". Tự kiểm tra + tải (nếu thiếu) ngay ở
+    # đây, có tiến trình %, để job không bao giờ crash vì lý do này nữa.
     if on_progress:
-        on_progress(0, f"Đang tóm tắt biên bản bằng {ollama_model}...")
+        on_progress(0, f"Đang kiểm tra model {ollama_model}...")
+
+    try:
+        for progress in ollama_manager.ensure_model_stream(ollama_model):
+            if on_progress:
+                # Dành 0-30% cho bước kiểm tra/tải model (nếu cần), 30-100%
+                # cho bước sinh biên bản thực sự phía dưới.
+                pct = min(30.0, progress["percent"] * 0.3)
+                msg = progress["message"] or f"Đang tải model {ollama_model}..."
+                on_progress(pct, msg)
+    except ollama_manager.OllamaUnreachable as e:
+        raise OllamaNotRunning(
+            f"Không tải được model '{ollama_model}'. {e}"
+        ) from e
+
+    if on_progress:
+        on_progress(30, f"Đang tóm tắt biên bản bằng {ollama_model}...")
 
     try:
         response = requests.post(
@@ -118,7 +144,7 @@ def summarize_meeting(
         full_text += piece
         tokens_seen += 1
         if on_progress:
-            pct = min(95.0, (tokens_seen / approx_total_tokens) * 100)
+            pct = 30.0 + min(65.0, (tokens_seen / approx_total_tokens) * 70)
             on_progress(pct, "Đang sinh biên bản...")
         if chunk.get("done"):
             break
