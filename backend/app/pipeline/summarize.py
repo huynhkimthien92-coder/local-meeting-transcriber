@@ -71,13 +71,21 @@ Nếu không đủ rõ để xác định người phụ trách hoặc hạn ch�
 # chia transcript thành từng đoạn nhỏ (đủ nằm gọn trong cửa sổ ngữ cảnh kể
 # cả với model nhỏ 1B dùng cho máy không GPU, xem hardware.py), tóm tắt
 # riêng từng đoạn ("map").
-CHUNK_CHAR_LIMIT = 6000  # ~1500 từ tiếng Việt mỗi đoạn
+# QUAN TRỌNG (tối ưu tốc độ, lỗi thật đã gặp: xử lý cuộc họp 52 phút mất hơn
+# 2 tiếng trên máy CPU yếu không GPU): CHUNK_CHAR_LIMIT càng lớn thì càng ÍT
+# lần gọi Ollama (đỡ tốn thời gian "nạp" prompt lặp lại mỗi lần gọi), nhưng
+# vẫn phải đủ NHỎ để prompt + phần model sinh ra nằm gọn trong cửa sổ ngữ
+# cảnh 4096 token (xem _ollama_generate). Đã tăng nhẹ so với ban đầu (6000
+# -> 8000 ký tự) để giảm số lần gọi mà vẫn còn dư khoảng cách an toàn.
+CHUNK_CHAR_LIMIT = 8000  # ~2000 từ tiếng Việt mỗi đoạn
 
 CHUNK_DIGEST_PROMPT_TEMPLATE = """\
 Đây là MỘT PHẦN (không phải toàn bộ) bản ghi lời nói của 1 cuộc họp, đã có \
-tên người nói. Hãy liệt kê ngắn gọn, dạng gạch đầu dòng, các ý chính / quyết \
-định / việc cần làm ĐÃ NÓI TRONG ĐOẠN NÀY (giữ nguyên tên riêng, số liệu nếu \
-có). KHÔNG bịa thêm, KHÔNG cố tóm tắt cả cuộc họp — chỉ đoạn dưới đây.
+tên người nói. Hãy liệt kê THẬT NGẮN GỌN (mỗi gạch đầu dòng tối đa 1 câu, \
+diễn giải lại bằng lời của bạn -- KHÔNG chép nguyên văn từng câu trong \
+transcript), dạng gạch đầu dòng, các ý chính / quyết định / việc cần làm ĐÃ \
+NÓI TRONG ĐOẠN NÀY (giữ nguyên tên riêng, số liệu nếu có). KHÔNG bịa thêm, \
+KHÔNG cố tóm tắt cả cuộc họp — chỉ đoạn dưới đây.
 
 --- ĐOẠN TRANSCRIPT ---
 {chunk}
@@ -352,10 +360,15 @@ def summarize_meeting(
         digest = _ollama_generate(
             ollama_model,
             CHUNK_DIGEST_PROMPT_TEMPLATE.format(chunk=chunk),
-            # Digest phải NGẮN hơn đoạn gốc -- log thực tế cho thấy digest
-            # hợp lệ luôn dưới ~850 token; chặn ở 900 để cắt sớm nếu model
-            # lỡ rơi vào vòng lặp, thay vì để nó tự tràn hết context.
-            num_predict=900,
+            # QUAN TRỌNG (tối ưu tốc độ): log thực tế cho thấy digest của
+            # model 1B thường KHÔNG cô đọng nhiều -- gần như chép lại từng
+            # câu của transcript gốc thay vì tóm tắt thật sự, khiến bước
+            # "map" (sinh chữ, tốc độ chỉ ~6-9 token/giây trên CPU yếu) tốn
+            # rất nhiều thời gian. Hạ trần xuống 500 (từ 900) để ép model
+            # dừng sớm hơn, cắt đáng kể thời gian sinh mỗi đoạn -- không mất
+            # nội dung vì transcript gốc của đoạn vẫn luôn còn nguyên trong
+            # Phụ lục của biên bản.
+            num_predict=500,
         )
         if not digest or len(digest) < 15:
             # Model không tóm tắt được đoạn này (hiếm, nhưng không được để
@@ -389,9 +402,10 @@ def summarize_meeting(
         on_progress=_final_progress,
         # Chỉ cần 3 mục ngắn (Mục tiêu/Quyết định/Việc cần làm), không phải
         # viết lại nội dung -- log thực tế cho thấy khi KHÔNG chặn, model có
-        # thể lặp tới 3787 token rồi bị cắt cụt mất định dạng. Chặn sớm ở
-        # 700 vừa đủ cho 3 mục, vừa tránh lặp lan man.
-        num_predict=700,
+        # thể lặp tới 3787 token rồi bị cắt cụt mất định dạng. Hạ tiếp xuống
+        # 500 (từ 700, tối ưu tốc độ) -- vẫn đủ cho 3 mục ngắn, tránh lặp
+        # lan man và sinh nhanh hơn trên CPU yếu.
+        num_predict=500,
     )
 
     muc_tieu_section = _extract_section(synth_text, "Mục tiêu")
