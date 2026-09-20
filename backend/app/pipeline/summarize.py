@@ -212,14 +212,38 @@ def _extract_section(text: str, keyword: str) -> str | None:
     return section or None
 
 
-def _ollama_generate(model: str, prompt: str, on_progress: Callable[[float], None] | None = None) -> str:
+def _ollama_generate(
+    model: str,
+    prompt: str,
+    on_progress: Callable[[float], None] | None = None,
+    num_predict: int = 900,
+) -> str:
     """Gọi Ollama /api/generate (stream), trả về text đầy đủ khi xong.
     on_progress (nếu có) được gọi với % 0-100 theo số "token" ước lượng đã
-    nhận — caller tự quy đổi sang thang % tổng thể của mình."""
+    nhận — caller tự quy đổi sang thang % tổng thể của mình.
+
+    QUAN TRỌNG (lỗi thật đã gặp): model nhỏ (1B) đôi khi rơi vào LẶP VÒNG
+    LẶP -- thay vì dừng đúng lúc (vài trăm token cho 1 đoạn tóm tắt ngắn),
+    nó sinh liên tục hàng nghìn token (log thực tế: 1 lần sinh tới 3395-3787
+    token) cho tới khi TRÀN cửa sổ ngữ cảnh (n_ctx=4096) và bị Ollama cắt
+    ngang giữa chừng -- vừa làm kết quả không đúng định dạng (mất phần cuối,
+    hỏng cả các tiêu đề "##"), vừa tốn thêm 10+ phút vô ích trên máy yếu.
+    num_predict giới hạn cứng số token model được sinh mỗi lần gọi -- chặn
+    đứng vòng lặp sớm thay vì để nó tự tràn context, và repeat_penalty cao
+    hơn mặc định của Ollama (1.1) để giảm khả năng lặp ngay từ đầu."""
     try:
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": True},
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": True,
+                "options": {
+                    "num_predict": num_predict,
+                    "repeat_penalty": 1.3,
+                    "repeat_last_n": 256,
+                },
+            },
             stream=True,
             # connect timeout ngắn, read timeout RẤT dài: token đầu tiên chỉ về
             # sau khi Ollama nạp xong model + xử lý hết prompt (prompt eval) —
@@ -309,6 +333,9 @@ def summarize_meeting(
             ollama_model,
             MEETING_MINUTES_PROMPT_TEMPLATE.format(transcript=transcript_text),
             on_progress=_short_progress,
+            # Cuộc họp ngắn nhưng phải viết đủ 4 phần (kể cả "Nội dung trao
+            # đổi chính" đầy đủ) -- cho phép dài hơn digest thường.
+            num_predict=1500,
         )
         if on_progress:
             on_progress(100, "Hoàn tất biên bản")
@@ -323,7 +350,12 @@ def summarize_meeting(
         if on_progress:
             on_progress(15.0 + (i / n) * 55.0, f"Đang đọc phần {i + 1}/{n} cuộc họp...")
         digest = _ollama_generate(
-            ollama_model, CHUNK_DIGEST_PROMPT_TEMPLATE.format(chunk=chunk)
+            ollama_model,
+            CHUNK_DIGEST_PROMPT_TEMPLATE.format(chunk=chunk),
+            # Digest phải NGẮN hơn đoạn gốc -- log thực tế cho thấy digest
+            # hợp lệ luôn dưới ~850 token; chặn ở 900 để cắt sớm nếu model
+            # lỡ rơi vào vòng lặp, thay vì để nó tự tràn hết context.
+            num_predict=900,
         )
         if not digest or len(digest) < 15:
             # Model không tóm tắt được đoạn này (hiếm, nhưng không được để
@@ -351,7 +383,16 @@ def summarize_meeting(
             on_progress(base_pct + (pct / 100.0) * remaining, "Đang tổng hợp biên bản...")
 
     synth_prompt = FINAL_SYNTHESIS_PROMPT_TEMPLATE.format(condensed=condensed)
-    synth_text = _ollama_generate(ollama_model, synth_prompt, on_progress=_final_progress)
+    synth_text = _ollama_generate(
+        ollama_model,
+        synth_prompt,
+        on_progress=_final_progress,
+        # Chỉ cần 3 mục ngắn (Mục tiêu/Quyết định/Việc cần làm), không phải
+        # viết lại nội dung -- log thực tế cho thấy khi KHÔNG chặn, model có
+        # thể lặp tới 3787 token rồi bị cắt cụt mất định dạng. Chặn sớm ở
+        # 700 vừa đủ cho 3 mục, vừa tránh lặp lan man.
+        num_predict=700,
+    )
 
     muc_tieu_section = _extract_section(synth_text, "Mục tiêu")
     quyet_dinh_section = _extract_section(synth_text, "Quyết định")
